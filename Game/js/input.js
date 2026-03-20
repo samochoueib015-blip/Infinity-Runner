@@ -202,8 +202,13 @@
                             if (window.sendOnlineActionState) {
                                 sendOnlineActionState(binding.player.id, binding.action, true);
                             }
-                        } else if (!isRepeat && window.sendOnlineActionTrigger) {
-                            sendOnlineActionTrigger(binding.player.id, binding.action);
+                        } else if (!isRepeat) {
+                            if (binding.action === "jump" || binding.action === "dash" || binding.action === "attack") {
+                                triggerPlayerAction(binding.player.id, binding.action, time);
+                            }
+                            if (window.sendOnlineActionTrigger) {
+                                sendOnlineActionTrigger(binding.player.id, binding.action);
+                            }
                         }
                         consumed = true;
                     } else {
@@ -416,8 +421,13 @@
                         if (window.sendOnlineActionState) {
                             sendOnlineActionState(playerId, action, true);
                         }
-                    } else if (window.sendOnlineActionTrigger) {
-                        sendOnlineActionTrigger(playerId, action);
+                    } else {
+                        if (action === "jump" || action === "dash" || action === "attack") {
+                            triggerPlayerAction(playerId, action, nowMs());
+                        }
+                        if (window.sendOnlineActionTrigger) {
+                            sendOnlineActionTrigger(playerId, action);
+                        }
                     }
                 } else if (action !== "left" && action !== "right") {
                     triggerPlayerAction(playerId, action, nowMs());
