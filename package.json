@@ -1,0 +1,12 @@
+{
+  "name": "infinity-runner-online",
+  "version": "0.6.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.8.1"
+  }
+}
