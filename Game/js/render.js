@@ -140,16 +140,7 @@
                     },
                     controls: controls,
                     baseSprite: spriteSet.base,
-                    bootsSprite: spriteSet.boots,
-                    netX: x,
-                    netY: y,
-                    netDy: 0,
-                    netKbx: 0,
-                    netFacing: "right",
-                    netIsMoving: false,
-                    netIsAttacking: false,
-                    netAlive: true,
-                    netLastSnapshotAt: 0
+                    bootsSprite: spriteSet.boots
                 };
                 player.el = document.createElement("div");
                 player.el.className = "player p" + index;

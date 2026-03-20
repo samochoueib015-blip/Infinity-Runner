@@ -148,12 +148,90 @@
                 return 0;
             }
 
+    function getEntityCenterX(x, w) {
+                return x + (w / 2);
+            }
+
+    function getEntityCenterY(y, h) {
+                return y + (h / 2);
+            }
+
+    function normalizeImpactSource(sourceLike, sourceY, sourceVX, sourceVY, baseKnockback, fallbackDir) {
+                if (typeof sourceLike === "object" && sourceLike) {
+                    return {
+                        x: typeof sourceLike.x === "number" ? sourceLike.x : 0,
+                        y: typeof sourceLike.y === "number" ? sourceLike.y : 0,
+                        vx: typeof sourceLike.vx === "number" ? sourceLike.vx : 0,
+                        vy: typeof sourceLike.vy === "number" ? sourceLike.vy : 0,
+                        knockbackScale: typeof sourceLike.knockbackScale === "number" ? sourceLike.knockbackScale : 1,
+                        baseKnockback: typeof sourceLike.baseKnockback === "number" ? sourceLike.baseKnockback : baseKnockback,
+                        fallbackDir: typeof sourceLike.fallbackDir === "number" ? sourceLike.fallbackDir : fallbackDir
+                    };
+                }
+                return {
+                    x: typeof sourceLike === "number" ? sourceLike : 0,
+                    y: typeof sourceY === "number" ? sourceY : 0,
+                    vx: typeof sourceVX === "number" ? sourceVX : 0,
+                    vy: typeof sourceVY === "number" ? sourceVY : 0,
+                    knockbackScale: 1,
+                    baseKnockback: baseKnockback,
+                    fallbackDir: fallbackDir
+                };
+            }
+
+    function applyDirectionalKnockback(target, targetW, targetH, impact) {
+                var targetCenterX = getEntityCenterX(target.x, targetW);
+                var targetCenterY = getEntityCenterY(target.y, targetH);
+                var dirX = targetCenterX - impact.x;
+                var dirY = targetCenterY - impact.y;
+                var len;
+                var strength = impact.baseKnockback * impact.knockbackScale;
+                if (Math.abs(dirX) < 0.001 && Math.abs(dirY) < 0.001) {
+                    dirX = impact.vx !== 0 ? signOf(impact.vx) : (impact.fallbackDir || 1);
+                    dirY = impact.vy;
+                }
+                len = Math.sqrt((dirX * dirX) + (dirY * dirY));
+                if (len < 0.001) {
+                    dirX = impact.fallbackDir || 1;
+                    dirY = 0;
+                    len = 1;
+                }
+                target.kbx = (dirX / len) * strength;
+                target.dy = (dirY / len) * strength;
+            }
+
+    function buildPlayerMeleeImpact(player, targetX, targetY, targetW, targetH) {
+                var vx = player.lastMoveX || 0;
+                var vy = player.dy || 0;
+                var downwardVy = Math.max(0, vy);
+                var speedMagnitude = Math.sqrt((vx * vx) + (downwardVy * downwardVy));
+                var knockbackScale = 1 + Math.max(0, speedMagnitude - 4) * CFG.combat.meleeSpeedKnockbackFactor;
+                var sourceY = getEntityCenterY(player.y, CFG.player.height);
+                var targetCenterY = getEntityCenterY(targetY, targetH);
+                var damage = 1;
+                if (downwardVy >= CFG.combat.meleeDownwardCritDy && sourceY < targetCenterY) {
+                    damage = 2;
+                    knockbackScale += CFG.combat.meleeDownwardCritKnockbackBonus;
+                }
+                knockbackScale = clamp(knockbackScale, 1, 3.2);
+                return {
+                    x: getEntityCenterX(player.x, CFG.player.width),
+                    y: sourceY,
+                    vx: vx,
+                    vy: vy,
+                    knockbackScale: knockbackScale,
+                    baseKnockback: CFG.combat.enemyTargetKnockback,
+                    fallbackDir: player.facing === "left" ? -1 : 1,
+                    damage: damage
+                };
+            }
+
     function playerCanTakeDamage(player, time) {
                 return player.alive && time - player.lastHit >= CFG.player.invulnMs;
             }
 
-    function damagePlayer(player, amount, time, sourceX) {
-                var playerCenter;
+    function damagePlayer(player, amount, time, sourceLike, sourceY, sourceVX, sourceVY) {
+                var impact;
                 if (!playerCanTakeDamage(player, time)) {
                     return false;
                 }
@@ -162,13 +240,8 @@
                     player.lives = 0;
                 }
                 player.lastHit = time;
-                playerCenter = player.x + (CFG.player.width / 2);
-                if (sourceX <= playerCenter) {
-                    player.kbx = CFG.player.hitKnockbackX;
-                } else {
-                    player.kbx = -CFG.player.hitKnockbackX;
-                }
-                player.dy = CFG.player.hitKnockbackY;
+                impact = normalizeImpactSource(sourceLike, sourceY, sourceVX, sourceVY, CFG.combat.playerTargetKnockback, sourceLike && sourceLike.fallbackDir ? sourceLike.fallbackDir : 1);
+                applyDirectionalKnockback(player, CFG.player.width, CFG.player.height, impact);
                 player.supportPlatform = null;
                 player.onGround = false;
                 if (player.lives <= 0) {
@@ -177,20 +250,15 @@
                 return true;
             }
 
-    function attackEnemy(enemy, damage, time, sourceX) {
-                var enemyCenter;
+    function attackEnemy(enemy, damage, time, sourceLike, sourceY, sourceVX, sourceVY) {
+                var impact;
                 if (enemy.hp <= 0) {
                     return;
                 }
                 enemy.hp -= damage;
                 enemy.lastHit = time;
-                enemyCenter = enemy.x + (CFG.enemy.width / 2);
-                if (sourceX <= enemyCenter) {
-                    enemy.kbx = CFG.enemy.hitKnockbackX;
-                } else {
-                    enemy.kbx = -CFG.enemy.hitKnockbackX;
-                }
-                enemy.dy = CFG.enemy.hitKnockbackY;
+                impact = normalizeImpactSource(sourceLike, sourceY, sourceVX, sourceVY, CFG.combat.enemyTargetKnockback, sourceLike && sourceLike.fallbackDir ? sourceLike.fallbackDir : 1);
+                applyDirectionalKnockback(enemy, CFG.enemy.width, CFG.enemy.height, impact);
                 enemy.supportPlatform = null;
                 if (enemy.hp <= 0) {
                     enemy.hp = 0;
@@ -519,7 +587,14 @@
                     if (enemyCanAttackTarget(enemy, target) && time - enemy.lastAttack >= CFG.enemy.attackCooldown) {
                         enemy.isAttacking = true;
                         enemy.lastAttack = time;
-                        damagePlayer(target, 1, time, enemy.x + (CFG.enemy.width / 2));
+                        damagePlayer(target, 1, time, {
+                            x: getEntityCenterX(enemy.x, CFG.enemy.width),
+                            y: getEntityCenterY(enemy.y, CFG.enemy.height),
+                            vx: enemy.lastMoveX || 0,
+                            vy: enemy.dy || 0,
+                            baseKnockback: CFG.combat.playerTargetKnockback,
+                            fallbackDir: enemy.face === "left" ? -1 : 1
+                        });
                         (function (ref) {
                             setTimeout(function () {
                                 ref.isAttacking = false;
@@ -696,6 +771,9 @@
                 if (!player.alive) {
                     return;
                 }
+                if (state.online && state.online.active && state.online.isHost && player.id !== state.online.localPlayerId) {
+                    return;
+                }
                 carryPlayerWithPlatform(player);
                 inputX = computePlayerInputX(player);
                 player.lastMoveX = inputX + player.kbx;
@@ -744,26 +822,65 @@
                 return player.x + distance;
             }
 
-    function runMeleeAttack(player, time) {
+    function lowerUpperHalfOverlap(lowerY, lowerH, upperY, upperH) {
+                return verticalOverlapAmount(lowerY, lowerH / 2, upperY + (upperH / 2), upperH / 2);
+            }
+
+    function attackerHasValidVerticalReach(attackerY, attackerH, targetY, targetH) {
+                if (attackerY > targetY + 2) {
+                    return lowerUpperHalfOverlap(attackerY, attackerH, targetY, targetH) > 0;
+                }
+                return true;
+            }
+
+    function playerMeleeHitsRect(player, targetX, targetY, targetW, targetH) {
                 var hitX = player.facing === "left" ? player.x - CFG.player.attackRange : player.x + CFG.player.width;
                 var hitY = player.y + 8;
                 var hitW = CFG.player.attackRange;
                 var hitH = CFG.player.height - 16;
+                var downwardX;
+                var downwardY;
+                var downwardW;
+                var downwardH;
+                var attackerCenterY = player.y + (CFG.player.height / 2);
+                var targetCenterY = targetY + (targetH / 2);
+                if (!attackerHasValidVerticalReach(player.y, CFG.player.height, targetY, targetH)) {
+                    return false;
+                }
+                if (rectsOverlap(hitX, hitY, hitW, hitH, targetX, targetY, targetW, targetH)) {
+                    return true;
+                }
+                if (attackerCenterY + 4 < targetCenterY) {
+                    downwardX = player.facing === "left" ? player.x - CFG.player.attackRange - 8 : player.x + CFG.player.width - 4;
+                    downwardY = player.y + (CFG.player.height * 0.42);
+                    downwardW = CFG.player.attackRange + 12;
+                    downwardH = (CFG.player.height * 0.9);
+                    if (rectsOverlap(downwardX, downwardY, downwardW, downwardH, targetX, targetY, targetW, targetH)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+    function runMeleeAttack(player, time) {
                 var i;
                 var enemy;
                 var other;
-                var sourceX = player.x + (CFG.player.width / 2);
+                var impact;
                 for (i = 0; i < enemies.length; i++) {
                     enemy = enemies[i];
-                    if (enemy.hp > 0 && rectsOverlap(hitX, hitY, hitW, hitH, enemy.x, enemy.y, CFG.enemy.width, CFG.enemy.height)) {
-                        attackEnemy(enemy, 1, time, sourceX);
+                    if (enemy.hp > 0 && playerMeleeHitsRect(player, enemy.x, enemy.y, CFG.enemy.width, CFG.enemy.height)) {
+                        impact = buildPlayerMeleeImpact(player, enemy.x, enemy.y, CFG.enemy.width, CFG.enemy.height);
+                        attackEnemy(enemy, impact.damage, time, impact);
                     }
                 }
                 if (isVersusMode()) {
                     for (i = 0; i < players.length; i++) {
                         other = players[i];
-                        if (other.id !== player.id && other.alive && rectsOverlap(hitX, hitY, hitW, hitH, other.x, other.y, CFG.player.width, CFG.player.height)) {
-                            damagePlayer(other, 1, time, sourceX);
+                        if (other.id !== player.id && other.alive && playerMeleeHitsRect(player, other.x, other.y, CFG.player.width, CFG.player.height)) {
+                            impact = buildPlayerMeleeImpact(player, other.x, other.y, CFG.player.width, CFG.player.height);
+                            impact.baseKnockback = CFG.combat.playerTargetKnockback;
+                            damagePlayer(other, impact.damage, time, impact);
                         }
                     }
                 }
@@ -797,7 +914,15 @@
                                 continue;
                             }
                             if (rectsOverlap(fireball.x, fireball.y, fireball.w, fireball.h, playerTarget.x, playerTarget.y, CFG.player.width, CFG.player.height)) {
-                                damagePlayer(playerTarget, 1, time, fireball.x + (fireball.w / 2));
+                                damagePlayer(playerTarget, 1, time, {
+                                    x: getEntityCenterX(fireball.x, fireball.w),
+                                    y: getEntityCenterY(fireball.y, fireball.h),
+                                    vx: fireball.vx,
+                                    vy: 0,
+                                    knockbackScale: CFG.combat.fireballKnockbackScale,
+                                    baseKnockback: CFG.combat.playerTargetKnockback,
+                                    fallbackDir: fireball.vx >= 0 ? 1 : -1
+                                });
                                 removeElement(fireball.el);
                                 fireballs.splice(i, 1);
                                 fireball = null;
@@ -808,7 +933,15 @@
                         for (j = 0; j < enemies.length; j++) {
                             enemy = enemies[j];
                             if (enemy.hp > 0 && rectsOverlap(fireball.x, fireball.y, fireball.w, fireball.h, enemy.x, enemy.y, CFG.enemy.width, CFG.enemy.height)) {
-                                attackEnemy(enemy, 2, time, fireball.x + (fireball.w / 2));
+                                attackEnemy(enemy, 2, time, {
+                                    x: getEntityCenterX(fireball.x, fireball.w),
+                                    y: getEntityCenterY(fireball.y, fireball.h),
+                                    vx: fireball.vx,
+                                    vy: 0,
+                                    knockbackScale: CFG.combat.fireballKnockbackScale,
+                                    baseKnockback: CFG.combat.enemyTargetKnockback,
+                                    fallbackDir: fireball.vx >= 0 ? 1 : -1
+                                });
                                 removeElement(fireball.el);
                                 fireballs.splice(i, 1);
                                 fireball = null;
@@ -840,7 +973,10 @@
                 var gapX = horizontalGap(enemy.x, CFG.enemy.width, player.x, CFG.player.width);
                 var gapY = verticalGap(enemy.y, CFG.enemy.height, player.y, CFG.player.height);
                 var centerGap = Math.abs((enemy.x + (CFG.enemy.width / 2)) - (player.x + (CFG.player.width / 2)));
-                return gapY <= CFG.enemy.attackGapY && (gapX <= CFG.enemy.attackGapX || centerGap <= CFG.enemy.width + 6);
+                if (!attackerHasValidVerticalReach(enemy.y, CFG.enemy.height, player.y, CFG.player.height)) {
+                    return false;
+                }
+                return gapY <= CFG.enemy.attackGapY && (gapX <= CFG.enemy.attackGapX || centerGap <= CFG.enemy.width * CFG.combat.enemyCenterReachScale);
             }
 
     function killPlayer(player, time) {

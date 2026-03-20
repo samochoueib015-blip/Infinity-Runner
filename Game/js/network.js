@@ -12,10 +12,8 @@
     var socket = null;
     var socketScriptLoading = false;
     var socketScriptLoaded = false;
-    var hostSnapshotIntervalMs = 16;
+    var hostSnapshotIntervalMs = 25;
     var hostSnapshotLastSentAt = 0;
-    var guestLoopHandle = 0;
-    var guestLoopTimer = 0;
 
     function $(id) {
         return document.getElementById(id);
@@ -51,9 +49,6 @@
         state.online.started = false;
         state.online.lobbyPlayers = [];
         state.online.lastSnapshotAt = 0;
-        state.online.lastServerCamX = 0;
-        state.online.lastServerCamY = 0;
-        stopGuestLoop();
     }
 
     function getOnlineNickname() {
@@ -202,11 +197,10 @@
         applyOnlinePlayerLabels(payload.players);
         closeStartOverlay();
         if (dom.world) {
-            applyGuestMotionStyle(dom.world, false);
+            dom.world.style.transition = "none";
+            dom.world.style.willChange = "left, top";
         }
         runtime.loopRunning = false;
-        state.online.lastSnapshotAt = 0;
-        stopGuestLoop();
         if (window.syncTouchControlsForMode) {
             syncTouchControlsForMode();
         }
@@ -221,143 +215,8 @@
             return;
         }
         el.setAttribute("data-guest-motion", "1");
-        el.style.willChange = includeBackground ? "left, top, background-position" : "left, top";
-        el.style.transition = "none";
-    }
-
-    function getLocalGuestPlayer() {
-        var i;
-        if (!(state.online && state.online.active && !state.online.isHost && state.online.started)) {
-            return null;
-        }
-        for (i = 0; i < players.length; i++) {
-            if (players[i].id === state.online.localPlayerId) {
-                return players[i];
-            }
-        }
-        return null;
-    }
-
-    function stepToward(current, target, factor, snapDistance) {
-        if (typeof target !== "number" || isNaN(target)) {
-            return current;
-        }
-        if (typeof current !== "number" || isNaN(current) || Math.abs(target - current) >= snapDistance) {
-            return target;
-        }
-        return current + (target - current) * factor;
-    }
-
-    function reconcilePredictedPlayer(player) {
-        if (!player) {
-            return;
-        }
-        player.x = stepToward(player.x, player.netX, 0.24, 120);
-        player.y = stepToward(player.y, player.netY, 0.30, 140);
-        player.dy = stepToward(player.dy, player.netDy, 0.22, 18);
-        player.kbx = stepToward(player.kbx, player.netKbx, 0.20, 12);
-        if (typeof player.netFacing === "string") {
-            player.facing = player.netFacing;
-        }
-        player.isMoving = !!player.netIsMoving || !!(player.inputState && (player.inputState.left || player.inputState.right));
-        player.isAttacking = !!player.netIsAttacking || !!player.isAttacking;
-        if (player.netAlive === false) {
-            player.alive = false;
-        }
-    }
-
-    function applyRemoteInterpolation(time) {
-        var i;
-        var player;
-        var fireball;
-        var frameY;
-        var localPlayer = getLocalGuestPlayer();
-        for (i = 0; i < players.length; i++) {
-            player = players[i];
-            if (!player) {
-                continue;
-            }
-            if (localPlayer && player.id === localPlayer.id) {
-                reconcilePredictedPlayer(player);
-            } else {
-                player.x = stepToward(player.x, player.netX, 0.38, 90);
-                player.y = stepToward(player.y, player.netY, 0.42, 100);
-                player.dy = stepToward(player.dy, player.netDy, 0.28, 18);
-                player.kbx = stepToward(player.kbx, player.netKbx, 0.25, 12);
-                if (typeof player.netFacing === "string") {
-                    player.facing = player.netFacing;
-                }
-                player.isMoving = !!player.netIsMoving;
-                player.isAttacking = !!player.netIsAttacking;
-                player.alive = player.netAlive !== false;
-            }
-        }
-        for (i = 0; i < platforms.length; i++) {
-            platforms[i].x = stepToward(platforms[i].x, platforms[i].netX, 0.45, 80);
-            platforms[i].y = stepToward(platforms[i].y, platforms[i].netY, 0.45, 80);
-            platforms[i].el.style.left = platforms[i].x + "px";
-            platforms[i].el.style.top = platforms[i].y + "px";
-        }
-        for (i = 0; i < enemies.length; i++) {
-            enemies[i].x = stepToward(enemies[i].x, enemies[i].netX, 0.38, 90);
-            enemies[i].y = stepToward(enemies[i].y, enemies[i].netY, 0.42, 100);
-            enemies[i].el.style.left = enemies[i].x + "px";
-            enemies[i].el.style.top = enemies[i].y + "px";
-        }
-        for (i = 0; i < pickups.length; i++) {
-            pickups[i].x = stepToward(pickups[i].x, pickups[i].netX, 0.34, 60);
-            pickups[i].y = stepToward(pickups[i].y, pickups[i].netY, 0.34, 60);
-            pickups[i].el.style.left = pickups[i].x + "px";
-            pickups[i].el.style.top = pickups[i].y + "px";
-        }
-        for (i = 0; i < fireballs.length; i++) {
-            fireball = fireballs[i];
-            fireball.x = stepToward(fireball.x, fireball.netX, 0.55, 120);
-            fireball.y = stepToward(fireball.y, fireball.netY, 0.55, 120);
-            frameY = Math.floor(time / 100) % 2 === 0 ? 0 : -20;
-            fireball.el.style.left = Math.floor(fireball.x) + "px";
-            fireball.el.style.top = Math.floor(fireball.y) + "px";
-            fireball.el.style.backgroundPosition = (fireball.vx > 0 ? -20 : 0) + "px " + frameY + "px";
-        }
-    }
-
-    function stopGuestLoop() {
-        if (guestLoopHandle && window.cancelAnimationFrame) {
-            window.cancelAnimationFrame(guestLoopHandle);
-        }
-        if (guestLoopTimer) {
-            window.clearTimeout(guestLoopTimer);
-        }
-        guestLoopHandle = 0;
-        guestLoopTimer = 0;
-    }
-
-    function guestTick() {
-        var time = nowMs();
-        var localPlayer;
-        if (!(state.online && state.online.active && !state.online.isHost && state.online.started)) {
-            stopGuestLoop();
-            return;
-        }
-        localPlayer = getLocalGuestPlayer();
-        if (localPlayer && localPlayer.alive) {
-            updatePlayerPhysics(localPlayer, time);
-        }
-        applyRemoteInterpolation(time);
-        refreshFocusMetrics();
-        updateCamera();
-        updatePlayerVisuals(time);
-        updateHud(time);
-        if (window.requestAnimationFrame) {
-            guestLoopHandle = window.requestAnimationFrame(guestTick);
-        } else {
-            guestLoopTimer = window.setTimeout(guestTick, 16);
-        }
-    }
-
-    function startGuestLoop() {
-        stopGuestLoop();
-        guestTick();
+        el.style.willChange = includeBackground ? "left, top" : "left, top";
+        el.style.transition = "left 35ms linear, top 35ms linear";
     }
 
     function createRemoteFireball(snapshotFireball) {
@@ -393,12 +252,8 @@
         for (i = 0; i < list.length; i++) {
             platform = platforms[i];
             applyGuestMotionStyle(platform.el, false);
-            platform.netX = list[i].x;
-            platform.netY = list[i].y;
-            if (!state.online.lastSnapshotAt) {
-                platform.x = platform.netX;
-                platform.y = platform.netY;
-            }
+            platform.x = list[i].x;
+            platform.y = list[i].y;
             platform.w = list[i].w;
             platform.h = list[i].h;
             platform.moveType = list[i].moveType;
@@ -427,10 +282,8 @@
             applyGuestMotionStyle(enemy.el, false);
             enemy.type = list[i].type;
             enemy.hp = list[i].hp;
-            enemy.netX = list[i].x;
-            enemy.netY = list[i].y;
-            enemy.x = !state.online.lastSnapshotAt ? enemy.netX : enemy.x;
-            enemy.y = !state.online.lastSnapshotAt ? enemy.netY : enemy.y;
+            enemy.x = list[i].x;
+            enemy.y = list[i].y;
             enemy.dy = list[i].dy;
             enemy.kbx = list[i].kbx;
             enemy.isAttacking = list[i].isAttacking;
@@ -460,10 +313,8 @@
             pickup = pickups[i];
             applyGuestMotionStyle(pickup.el, false);
             pickup.kind = list[i].kind;
-            pickup.netX = list[i].x;
-            pickup.netY = list[i].y;
-            pickup.x = !state.online.lastSnapshotAt ? pickup.netX : pickup.x;
-            pickup.y = !state.online.lastSnapshotAt ? pickup.netY : pickup.y;
+            pickup.x = list[i].x;
+            pickup.y = list[i].y;
             pickup.baseX = list[i].baseX;
             pickup.baseY = list[i].baseY;
             pickup.bobPhase = list[i].bobPhase;
@@ -488,10 +339,8 @@
             fireball = fireballs[i];
             applyGuestMotionStyle(fireball.el, true);
             fireball.ownerId = list[i].ownerId;
-            fireball.netX = list[i].x;
-            fireball.netY = list[i].y;
-            fireball.x = !state.online.lastSnapshotAt ? fireball.netX : fireball.x;
-            fireball.y = !state.online.lastSnapshotAt ? fireball.netY : fireball.y;
+            fireball.x = list[i].x;
+            fireball.y = list[i].y;
             fireball.vx = list[i].vx;
             fireball.w = list[i].w;
             fireball.h = list[i].h;
@@ -511,30 +360,13 @@
                 continue;
             }
             player.label = list[i].label;
-            player.netX = list[i].x;
-            player.netY = list[i].y;
-            player.netDy = list[i].dy;
-            player.netKbx = list[i].kbx;
-            player.netFacing = list[i].facing;
-            player.netIsMoving = list[i].isMoving;
-            player.netIsAttacking = list[i].isAttacking;
-            player.netAlive = list[i].alive;
-            if (!state.online.lastSnapshotAt) {
-                player.x = player.netX;
-                player.y = player.netY;
-                player.dy = player.netDy;
-                player.kbx = player.netKbx;
-                player.facing = player.netFacing;
-            }
-            if (player.id !== state.online.localPlayerId) {
-                player.x = stepToward(player.x, player.netX, 0.60, 120);
-                player.y = stepToward(player.y, player.netY, 0.60, 140);
-                player.dy = player.netDy;
-                player.kbx = player.netKbx;
-                player.facing = player.netFacing;
-            }
+            player.x = list[i].x;
+            player.y = list[i].y;
             player.spawnX = list[i].spawnX;
             player.spawnY = list[i].spawnY;
+            player.dy = list[i].dy;
+            player.kbx = list[i].kbx;
+            player.facing = list[i].facing;
             player.onGround = list[i].onGround;
             player.extraJumpsLeft = list[i].extraJumpsLeft;
             player.isMoving = list[i].isMoving;
@@ -547,9 +379,7 @@
             player.lastFireTime = list[i].lastFireTime;
             player.bootsUntil = list[i].bootsUntil;
             player.lastMoveX = list[i].lastMoveX;
-            if (player.id !== state.online.localPlayerId) {
-                player.alive = list[i].alive;
-            }
+            player.alive = list[i].alive;
             player.waitingRespawn = list[i].waitingRespawn;
             player.respawnAt = list[i].respawnAt;
             player.deathTime = list[i].deathTime;
@@ -563,6 +393,56 @@
         }
     }
 
+    function applyAuthoritativePlayers(list, refreshCamera) {
+        var i;
+        var j;
+        var incoming;
+        var player;
+        var time = nowMs();
+        for (i = 0; i < list.length; i++) {
+            incoming = list[i];
+            for (j = 0; j < players.length; j++) {
+                player = players[j];
+                if (!player || player.id !== incoming.id) {
+                    continue;
+                }
+                if (state.online && state.online.isHost && player.id === state.online.localPlayerId) {
+                    continue;
+                }
+                player.x = incoming.x;
+                player.y = incoming.y;
+                player.spawnX = incoming.spawnX;
+                player.spawnY = incoming.spawnY;
+                player.dy = incoming.dy;
+                player.kbx = incoming.kbx;
+                player.facing = incoming.facing;
+                player.onGround = incoming.onGround;
+                player.extraJumpsLeft = incoming.extraJumpsLeft;
+                player.isMoving = incoming.isMoving;
+                player.lives = incoming.lives;
+                player.fireAmmo = incoming.fireAmmo;
+                player.lastHit = incoming.lastHit;
+                player.lastDashTime = incoming.lastDashTime;
+                player.lastAttackTime = incoming.lastAttackTime;
+                player.lastFireTime = incoming.lastFireTime;
+                player.bootsUntil = incoming.bootsUntil;
+                player.lastMoveX = incoming.lastMoveX;
+                player.alive = incoming.alive;
+                player.waitingRespawn = incoming.waitingRespawn;
+                player.respawnAt = incoming.respawnAt;
+                applyGuestMotionStyle(player.el, false);
+                applyGuestMotionStyle(player.swingEl, false);
+                break;
+            }
+        }
+        refreshFocusMetrics();
+        if (refreshCamera) {
+            updateCamera();
+        }
+        updatePlayerVisuals(time);
+        updateHud(time);
+    }
+
     function applySnapshot(snapshot) {
         var time = snapshot.time || nowMs();
         if (!(state.online && state.online.active) || state.online.isHost) {
@@ -571,8 +451,8 @@
         state.mode = snapshot.mode;
         state.modePlayers = snapshot.players.length;
         state.score = snapshot.score;
-        state.online.lastServerCamX = snapshot.camX;
-        state.online.lastServerCamY = snapshot.camY;
+        state.camX = snapshot.camX;
+        state.camY = snapshot.camY;
         state.moonUntil = snapshot.moonUntil;
         state.gameOver = snapshot.gameOver;
         syncPlatforms(snapshot.platforms || []);
@@ -580,16 +460,12 @@
         syncPickups(snapshot.pickups || []);
         syncFireballs(snapshot.fireballs || [], time);
         syncPlayers(snapshot.players || []);
-        state.online.lastSnapshotAt = time;
-        if (!guestLoopHandle && !guestLoopTimer) {
-            startGuestLoop();
-        }
         refreshFocusMetrics();
         updatePlayerVisuals(time);
         updateHud(time);
-        if (!guestLoopHandle && !guestLoopTimer) {
-            updateCamera();
-        }
+        dom.world.style.left = Math.floor(state.camX) + "px";
+        dom.world.style.top = Math.floor(state.camY) + "px";
+        updateParallax();
         if (snapshot.overlay) {
             setText(dom.gameOverTitle, snapshot.overlay.title || "Runde beendet");
             setText(dom.gameOverScore, snapshot.overlay.score || "");
@@ -750,7 +626,6 @@
         socket.on("disconnect", function () {
             state.online.connected = false;
             setOnlineStatus("Verbindung zum Online-Server getrennt.", true);
-            stopGuestLoop();
             if (state.online.active && state.online.started) {
                 setText(dom.gameOverTitle, "Verbindung getrennt");
                 setText(dom.gameOverScore, "Die Online-Runde wurde beendet.");
@@ -810,13 +685,14 @@
             applySnapshot(payload);
         });
 
-        socket.on("remote-input-state", function (payload) {
-            if (state.online.active && state.online.isHost) {
-                setPlayerAction(payload.playerId, payload.action, payload.isPressed);
+        socket.on("authoritative-players", function (payload) {
+            if (!(state.online && state.online.active && state.online.started)) {
+                return;
             }
+            applyAuthoritativePlayers((payload && payload.players) || [], false);
         });
 
-        socket.on("remote-input-trigger", function (payload) {
+        socket.on("remote-action-trigger", function (payload) {
             if (state.online.active && state.online.isHost) {
                 triggerPlayerAction(payload.playerId, payload.action, nowMs());
             }

@@ -61,6 +61,15 @@
                     impulseDamping: 0.78,
                     minImpulse: 0.12
                 },
+                combat: {
+                    playerTargetKnockback: 19.5,
+                    enemyTargetKnockback: 15.5,
+                    fireballKnockbackScale: 0.95,
+                    meleeSpeedKnockbackFactor: 0.055,
+                    meleeDownwardCritDy: 10,
+                    meleeDownwardCritKnockbackBonus: 0.75,
+                    enemyCenterReachScale: 0.78
+                },
                 camera: {
                     smooth: 0.1
                 },
